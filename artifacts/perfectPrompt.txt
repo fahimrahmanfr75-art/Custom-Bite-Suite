@@ -1,0 +1,34 @@
+Creating a prompt that makes an AI fully understand your intent—and exceed your expectations—requires moving from a simple question-and-answer model to a "structured instruction" approach. High-quality prompting acts as a roadmap, reducing the AI's need to guess.
+
+Here is how to create a "master" prompt, incorporating techniques from the search results.
+
+1. The Anatomy of a Perfect Prompt (The CODE Framework)
+To get the best results, structure your prompt using the CODE formula: Context, Own script, Documents, and Elements:
+Context: Tell the AI why you are doing this, who it is acting as (role), and the target audience.
+Own Script (Instruction): Use clear action verbs like "Write," "Summarize," or "Analyze."
+Documents/Data: Attach relevant files, text, or data for the AI to analyze.
+Elements (Constraints & Format): Define the length, tone, style, and structure (e.g., Markdown table, JSON).
+
+2. Techniques to Make the AI "Think" Better
+Instead of just asking for an output, guide the AI's reasoning process:
+Role-Playing ("You are a..."): Start your prompt by assigning a persona, such as "You are a senior UX designer with 20 years of experience".
+Chain-of-Thought ("Think Step-by-Step"): Ask the AI to explain its reasoning before giving the final answer. This catches errors and results in a more logical, comprehensive output.
+Few-Shot Prompting (Show, Don't Just Tell): Provide 1–3 examples of the desired input-output format within your prompt. This helps the AI mimic your desired tone and structure perfectly.
+
+3. How to Make the AI "Better Than Expected"
+To get creative, superior results, you must invite the AI to think beyond the immediate prompt:
+Reverse Prompting ("Before you start, ask me questions"): End your prompt with: "Before you start, ask me any questions you need to ensure the output is perfect".
+Explicit Creative Permission ("Hallucinate Creative Solutions"): For brainstorming, tell the AI: "This is a creative session. Think out-of-the-box and provide 3 conventional ideas and 2 unconventional, breakthrough ideas".
+Self-Consistency (Generate & Select): Ask the AI to generate three different versions of the output, then ask it to select the best one based on your constraints.
+
+4. Example: Before vs. After
+Weak Prompt: "Write a marketing email for a new water bottle."
+Master Prompt (Using Persona, Context, Constraints, & Goal): "You are an expert direct-response copywriter. Write a 100-word marketing email for a new water bottle (The Hydro-Titan).
+Context: The bottle is indestructible and keeps water cold for 48 hours. The target audience is busy urban professionals.
+Constraints: Use a professional yet punchy tone. Avoid cliché phrases like 'unleash your potential.'
+Goal: Get them to click the link to purchase.
+Format: Include a catchy subject line and 3 bullet points of benefits.
+Before writing, ask me any clarifying questions about the product to ensure success."
+
+5. Final Step: Iterate
+Rarely is the first prompt perfect. If the output is not quite right, do not just rephrase it. Tell the AI what was wrong: "That output was too formal. Make it more conversational, and focus more on the 'indestructible' aspect".

@@ -1,0 +1,41 @@
+erDiagram
+  users ||--o| app_session : has
+  users ||--o{ orders : places
+  users ||--o{ refund_requests : submits
+  users ||--o{ reviews : writes
+  users ||--o{ audit_logs : performs
+  users ||--o{ orders : delivers
+  categories ||--o{ dishes : groups
+  dishes ||--o{ dish_ingredients : defines
+  ingredients ||--o{ dish_ingredients : participates
+  dishes ||--o{ order_items : ordered_as
+  orders ||--o{ order_items : contains
+  order_items ||--o{ order_item_customizations : customizes
+  ingredients ||--o{ order_item_customizations : referenced_by
+  orders ||--o| refund_requests : may_create
+  dishes ||--o{ reviews : receives
+
+  users {
+    int id PK
+    text role
+    text username UK
+    text email UK
+    text phone UK
+    text password_hash
+  }
+  dishes {
+    int id PK
+    int category_id FK
+    text name UK
+    real price
+    int is_available
+  }
+  orders {
+    int id PK
+    int customer_id FK
+    int rider_id FK
+    text status
+    text payment_method
+    text payment_status
+    real total
+  }
