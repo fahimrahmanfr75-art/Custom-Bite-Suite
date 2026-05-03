@@ -120,6 +120,95 @@ describe('critical regression fixes', () => {
     );
   });
 
+  it('stores the delivery location chosen for that order instead of the customer profile address', async () => {
+    let insertId = 200;
+    mockDb.getFirstAsync.mockResolvedValue({
+      id: 9,
+    });
+    mockDb.runAsync.mockImplementation(async () => ({ changes: 1, lastInsertRowId: ++insertId }));
+
+    await placeOrder(
+      9,
+      [
+        {
+          dishId: 3,
+          quantity: 1,
+          basePrice: 12,
+          instructions: '',
+          customizations: [],
+        },
+      ],
+      {
+        deliveryNotes: 'Leave at gate',
+        paymentMethod: 'card',
+        latitude: 23.81234,
+        longitude: 90.45678,
+        deliveryAddressLine: 'Gulshan 2_Road_10_House_5A',
+      },
+      0
+    );
+
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO orders'),
+      9,
+      'Gulshan 2_Road_10_House_5A',
+      23.81234,
+      90.45678,
+      'Leave at gate',
+      'card',
+      'paid',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(String)
+    );
+  });
+
+  it('stores a pinned-location address when the order uses GPS coordinates without a manual address', async () => {
+    let insertId = 300;
+    mockDb.getFirstAsync.mockResolvedValue({
+      id: 9,
+    });
+    mockDb.runAsync.mockImplementation(async () => ({ changes: 1, lastInsertRowId: ++insertId }));
+
+    await placeOrder(
+      9,
+      [
+        {
+          dishId: 3,
+          quantity: 1,
+          basePrice: 12,
+          instructions: '',
+          customizations: [],
+        },
+      ],
+      {
+        deliveryNotes: '',
+        paymentMethod: 'cod',
+        latitude: 23.7654321,
+        longitude: 90.3987654,
+      },
+      0
+    );
+
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO orders'),
+      9,
+      'Pinned location (23.76543, 90.39877)',
+      23.7654321,
+      90.3987654,
+      '',
+      'cod',
+      'cod_pending',
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(Number),
+      expect.any(String)
+    );
+  });
+
   it('loads notifications from app_notifications and creates customer status updates', async () => {
     mockDb.getAllAsync.mockResolvedValueOnce([
       {

@@ -5,9 +5,11 @@ import {
   assignOrderRider,
   cancelOrderByCustomer,
   claimOrderByRider,
+  clearPersistedCart,
   confirmCash,
   deleteDishRecord,
   exportDatabaseJson,
+  getCart,
   getAppStoreSnapshot,
   importDatabaseJson,
   initializeRepository,
@@ -28,6 +30,7 @@ import {
   updateRiderLocation as updateRiderLocationAction,
   upsertBannerImage,
   upsertDishRecord,
+  replaceCart,
   type AppStoreTopic,
 } from '../data/repository';
 import type {
@@ -113,6 +116,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const sessionState = useStoreTopic('session');
 
+  const persistCart = async (nextCart: CartItem[], session = sessionState.session) => {
+    await replaceCart(session, nextCart);
+  };
+
+  const updateCart = (updater: CartItem[] | ((current: CartItem[]) => CartItem[])) => {
+    setCart((current) => {
+      const nextCart = typeof updater === 'function' ? updater(current) : updater;
+      void persistCart(nextCart).catch((error) => {
+        setErrorMessage(error instanceof Error ? error.message : 'Failed to persist cart');
+      });
+      return nextCart;
+    });
+  };
+
   useEffect(() => {
     let mounted = true;
 
@@ -137,6 +154,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (!isReady) {
+      return;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const storedCart = await getCart(sessionState.session);
+        if (!cancelled) {
+          setCart(storedCart);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(error instanceof Error ? error.message : 'Failed to restore cart');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, sessionState.session]);
+
+  useEffect(() => {
     const session = sessionState.session;
     if (!isReady || !session) {
       return;
@@ -147,13 +189,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       try {
         const registration = await registerDeviceForPushNotificationsAsync();
-        if (cancelled || !registration.token) {
+        if (cancelled) {
+          return;
+        }
+
+        if (registration.error) {
+          setErrorMessage(`Push notifications unavailable: ${registration.error}`);
+          return;
+        }
+
+        if (!registration.token) {
           return;
         }
 
         await syncPushTokenWithServer(session, registration.token);
-      } catch {
-        // Push setup failures should not block the app lifecycle.
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(
+            error instanceof Error
+              ? `Push notifications unavailable: ${error.message}`
+              : 'Push notifications unavailable.'
+          );
+        }
       }
     })();
 
@@ -187,26 +244,31 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       login: (payload) => wrap(async () => {
         await loginAction(payload);
         await refreshAppStore(['session', 'notifications']);
+        setCart(await getCart(getAppStoreSnapshot('session').session));
       }),
       register: (payload) => wrap(async () => {
         await registerAction(payload);
         await refreshAppStore(['session', 'notifications']);
+        setCart(await getCart(getAppStoreSnapshot('session').session));
       }),
       logout: () =>
         wrap(async () => {
+          const activeSession = getAppStoreSnapshot('session').session;
           await logoutAction();
+          await clearPersistedCart(activeSession);
+          await clearPersistedCart(null);
           await refreshAppStore(['session', 'notifications']);
           setCart([]);
         }),
-      addToCart: (item) => setCart((current) => [...current, item]),
+      addToCart: (item) => updateCart((current) => [...current, item]),
       updateCartQuantity: (id, quantity) =>
-        setCart((current) =>
+        updateCart((current) =>
           current
             .map((item) => (item.id === id ? { ...item, quantity } : item))
             .filter((item) => item.quantity > 0)
         ),
-      removeFromCart: (id) => setCart((current) => current.filter((item) => item.id !== id)),
-      clearCart: () => setCart([]),
+      removeFromCart: (id) => updateCart((current) => current.filter((item) => item.id !== id)),
+      clearCart: () => updateCart([]),
       placeOrder: (payload) =>
         wrap(async () => {
           const { session } = getAppStoreSnapshot('session');
@@ -215,6 +277,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           }
           const activeDiscountPercent = getActiveDiscountPercent(getAppStoreSnapshot('catalog').offers);
           await placeOrderAction(session.userId, cart, payload, activeDiscountPercent);
+          await clearPersistedCart(session);
           setCart([]);
           await refreshAppStore(['orders', 'notifications', 'metrics', 'audit']);
         }),
@@ -408,7 +471,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           await refreshAppStore();
         }),
     }),
-    [cart, errorMessage, isBusy, isReady]
+    [cart, errorMessage, isBusy, isReady, sessionState.session]
   );
 
   return <AppActionsContext.Provider value={value}>{children}</AppActionsContext.Provider>;

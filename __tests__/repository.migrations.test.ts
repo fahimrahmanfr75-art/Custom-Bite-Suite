@@ -131,8 +131,9 @@ function createFakeDatabase(options?: {
 
 describe('repository migrations', () => {
   it('detects the legacy schemas that require rebuilds', () => {
+    expect(__migrationInternals.needsIngredientsTableRebuild(['id', 'name'])).toBe(true);
     expect(__migrationInternals.needsIngredientsTableRebuild(['id', 'name', 'is_allergen'])).toBe(
-      true
+      false
     );
     expect(
       __migrationInternals.needsDishIngredientsTableRebuild([
@@ -151,6 +152,10 @@ describe('repository migrations', () => {
         'status',
         'rejected_at',
         'canceled_at',
+        'rider_latitude',
+        'rider_longitude',
+        'last_location_update',
+        'updated_at',
         'created_at',
       ])
     ).toBe(false);
@@ -169,7 +174,7 @@ describe('repository migrations', () => {
         expect.stringContaining('CREATE TABLE IF NOT EXISTS users'),
       ])
     );
-    expect(runCalls.map((call) => call.params[0])).toEqual([1, 2, 3, 4]);
+    expect(runCalls.map((call) => call.params[0])).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect(execStatements.at(-1)).toContain('PRAGMA foreign_keys = ON');
   });
 
@@ -180,7 +185,7 @@ describe('repository migrations', () => {
 
     await __migrationInternals.runMigrations(database as never);
 
-    expect(runCalls.map((call) => call.params[0])).toEqual([3, 4]);
+    expect(runCalls.map((call) => call.params[0])).toEqual([3, 4, 5, 6, 7]);
     const baselineExec = execStatements.filter((sql) =>
       sql.includes('CREATE TABLE IF NOT EXISTS users')
     );
@@ -239,6 +244,24 @@ describe('repository migrations', () => {
     expect(execStatements.join('\n')).toContain('ALTER TABLE dishes ADD COLUMN external_key');
     expect(execStatements.join('\n')).toContain(
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_banner_images_external_key'
+    );
+  });
+
+  it('adds operational indexes for order, review, and audit lookups', async () => {
+    const { database, execStatements, runCalls } = createFakeDatabase({
+      appliedVersions: [1, 2, 3, 4, 5, 6],
+    });
+
+    await __migrationInternals.runMigrations(database as never);
+
+    expect(runCalls.map((call) => call.params[0])).toEqual([7]);
+    const sql = execStatements.join('\n');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id)');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_orders_rider_id ON orders(rider_id)');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_reviews_dish_id ON reviews(dish_id)');
+    expect(sql).toContain(
+      'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)'
     );
   });
 

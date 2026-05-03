@@ -30,6 +30,9 @@ export { getUsers, getSession, login, logout, register } from './auth';
 // Orders
 export { getOrders, placeOrder, advanceOrder, assignOrderRider, confirmCash, cancelOrderByCustomer, claimOrderByRider, rejectOrder, updateRiderLocation } from './orders';
 
+// Cart
+export { clearCart as clearPersistedCart, getCart, replaceCart } from './cart';
+
 // Reviews
 export { getReviews, submitReview } from './reviews';
 

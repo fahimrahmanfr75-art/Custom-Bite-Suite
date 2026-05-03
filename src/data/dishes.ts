@@ -39,7 +39,6 @@ type DishIngredientRow = {
   ingredient_category_id: number | null;
   ingredient_category_name: string | null;
   ingredient_name: string;
-  is_allergen: number;
   is_mandatory: number;
   is_default: number;
   extra_price: number;
@@ -128,7 +127,6 @@ export async function getDishes() {
          di.ingredient_category_id,
          ic.name AS ingredient_category_name,
          i.name AS ingredient_name,
-         i.is_allergen,
          di.is_mandatory,
          di.is_default,
          di.extra_price,

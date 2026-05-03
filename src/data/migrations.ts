@@ -9,7 +9,7 @@ function hasColumn(columns: string[], columnName: string) {
 }
 
 export function needsIngredientsTableRebuild(columns: string[]) {
-  return hasColumn(columns, 'is_allergen');
+  return columns.length > 0 && !hasColumn(columns, 'is_allergen');
 }
 
 export function needsDishIngredientsTableRebuild(columns: string[]) {
@@ -23,7 +23,15 @@ export function needsDishIngredientsTableRebuild(columns: string[]) {
 }
 
 export function needsOrdersTableRebuild(columns: string[]) {
-  return hasColumn(columns, 'cancelled_at') || !hasColumn(columns, 'rejected_at') || !hasColumn(columns, 'canceled_at');
+  return (
+    hasColumn(columns, 'cancelled_at') ||
+    !hasColumn(columns, 'rejected_at') ||
+    !hasColumn(columns, 'canceled_at') ||
+    !hasColumn(columns, 'rider_latitude') ||
+    !hasColumn(columns, 'rider_longitude') ||
+    !hasColumn(columns, 'last_location_update') ||
+    !hasColumn(columns, 'updated_at')
+  );
 }
 
 type Migration = {
@@ -107,10 +115,11 @@ const migrations: Migration[] = [
         await txn.execAsync(`
           CREATE TABLE IF NOT EXISTS ingredients_next (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE
+            name TEXT NOT NULL UNIQUE,
+            is_allergen INTEGER NOT NULL DEFAULT 0
           );
-          INSERT INTO ingredients_next (id, name)
-          SELECT id, name FROM ingredients;
+          INSERT INTO ingredients_next (id, name, is_allergen)
+          SELECT id, name, 0 FROM ingredients;
           DROP TABLE ingredients;
           ALTER TABLE ingredients_next RENAME TO ingredients;
         `);
@@ -193,6 +202,57 @@ const migrations: Migration[] = [
         ALTER TABLE banner_images ADD COLUMN source TEXT NOT NULL DEFAULT 'operator';
         ALTER TABLE banner_images ADD COLUMN external_key TEXT;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_banner_images_external_key ON banner_images(external_key);
+      `);
+    },
+  },
+  {
+    version: 5,
+    apply: async (txn) => {
+      const ingredientColumns = (
+        await txn.getAllAsync<{ name?: string }>('PRAGMA table_info(ingredients)')
+      )
+        .map((row) => row.name)
+        .filter((name): name is string => typeof name === 'string');
+
+      if (!hasColumn(ingredientColumns, 'is_allergen')) {
+        await txn.execAsync(
+          'ALTER TABLE ingredients ADD COLUMN is_allergen INTEGER NOT NULL DEFAULT 0'
+        );
+      }
+    },
+  },
+  {
+    version: 6,
+    apply: async (txn) => {
+      const orderColumns = (
+        await txn.getAllAsync<{ name?: string }>('PRAGMA table_info(orders)')
+      )
+        .map((row) => row.name)
+        .filter((name): name is string => typeof name === 'string');
+
+      if (!hasColumn(orderColumns, 'rider_latitude')) {
+        await txn.execAsync('ALTER TABLE orders ADD COLUMN rider_latitude REAL');
+      }
+      if (!hasColumn(orderColumns, 'rider_longitude')) {
+        await txn.execAsync('ALTER TABLE orders ADD COLUMN rider_longitude REAL');
+      }
+      if (!hasColumn(orderColumns, 'last_location_update')) {
+        await txn.execAsync('ALTER TABLE orders ADD COLUMN last_location_update TEXT');
+      }
+      if (!hasColumn(orderColumns, 'updated_at')) {
+        await txn.execAsync('ALTER TABLE orders ADD COLUMN updated_at TEXT');
+      }
+    },
+  },
+  {
+    version: 7,
+    apply: async (txn) => {
+      await txn.execAsync(`
+        CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+        CREATE INDEX IF NOT EXISTS idx_orders_rider_id ON orders(rider_id);
+        CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+        CREATE INDEX IF NOT EXISTS idx_reviews_dish_id ON reviews(dish_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
       `);
     },
   },

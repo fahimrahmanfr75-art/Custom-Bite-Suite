@@ -75,9 +75,6 @@ type RefundRow = {
 
 type UserRow = {
   id: number;
-  address_line: string;
-  latitude: number;
-  longitude: number;
 };
 
 function nowIso() {
@@ -229,6 +226,15 @@ export async function placeOrder(
   if (!customer) {
     throw new Error('Customer account not found');
   }
+  if (!Number.isFinite(payload.latitude) || !Number.isFinite(payload.longitude)) {
+    throw new Error('A valid delivery location is required');
+  }
+
+  const trimmedAddress = payload.deliveryAddressLine?.trim();
+  const orderAddressLine =
+    trimmedAddress && trimmedAddress.length > 0
+      ? trimmedAddress
+      : `Pinned location (${payload.latitude.toFixed(5)}, ${payload.longitude.toFixed(5)})`;
 
   const totals = calculateOrderTotals(
     cartItems.map((item, index) => ({
@@ -247,12 +253,12 @@ export async function placeOrder(
   await db.withExclusiveTransactionAsync(async (txn) => {
     const orderResult = await txn.runAsync(
       `INSERT INTO orders
-        (customer_id, rider_id, address_line, latitude, longitude, delivery_notes, status, payment_method, payment_status, subtotal, discount, delivery_fee, total, created_at)
+       (customer_id, rider_id, address_line, latitude, longitude, delivery_notes, status, payment_method, payment_status, subtotal, discount, delivery_fee, total, created_at)
        VALUES (?, NULL, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)`,
       customerId,
-      customer.address_line,
-      customer.latitude,
-      customer.longitude,
+      orderAddressLine,
+      payload.latitude,
+      payload.longitude,
       payload.deliveryNotes.trim(),
       payload.paymentMethod,
       payload.paymentMethod === 'cod' ? 'cod_pending' : 'paid',

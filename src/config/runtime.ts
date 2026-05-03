@@ -16,7 +16,7 @@ type ExpoConfigExtra = {
   };
 };
 
-function sanitizeUrl(value: unknown) {
+function sanitizeProjectId(value: unknown) {
   if (typeof value !== 'string') {
     return null;
   }
@@ -25,13 +25,47 @@ function sanitizeUrl(value: unknown) {
   if (trimmed.length === 0 || trimmed.startsWith('YOUR_')) {
     return null;
   }
+
+  return trimmed;
+}
+
+function isReservedPlaceholderHost(hostname: string) {
+  return (
+    hostname === 'example' ||
+    hostname === 'example.com' ||
+    hostname.endsWith('.example') ||
+    hostname.endsWith('.example.com') ||
+    hostname === 'invalid' ||
+    hostname.endsWith('.invalid')
+  );
+}
+
+function sanitizeRemoteUrl(value: unknown, allowedProtocols: ReadonlySet<string>) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.startsWith('YOUR_')) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (!allowedProtocols.has(parsed.protocol) || isReservedPlaceholderHost(parsed.hostname)) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
   return trimmed;
 }
 
 const extra = (Constants.expoConfig?.extra ?? {}) as ExpoConfigExtra;
 
 export const runtimeConfig: RuntimeConfig = {
-  expoProjectId: sanitizeUrl(extra.eas?.projectId),
-  pushApiBaseUrl: sanitizeUrl(extra.pushApiBaseUrl),
-  realtimeWebSocketUrl: sanitizeUrl(extra.realtime?.webSocketUrl),
+  expoProjectId: sanitizeProjectId(extra.eas?.projectId),
+  pushApiBaseUrl: sanitizeRemoteUrl(extra.pushApiBaseUrl, new Set(['https:', 'http:'])),
+  realtimeWebSocketUrl: sanitizeRemoteUrl(extra.realtime?.webSocketUrl, new Set(['wss:', 'ws:'])),
 };

@@ -76,6 +76,19 @@ export async function execSchema() {
         FOREIGN KEY(user_id) REFERENCES users(id)
       );
 
+      CREATE TABLE IF NOT EXISTS cart_items (
+        id TEXT PRIMARY KEY,
+        owner_key TEXT NOT NULL,
+        dish_id INTEGER NOT NULL,
+        dish_name TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        base_price REAL NOT NULL,
+        instructions TEXT NOT NULL DEFAULT '',
+        customizations_json TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(dish_id) REFERENCES dishes(id)
+      );
+
       CREATE TABLE IF NOT EXISTS categories (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
@@ -265,6 +278,7 @@ export async function execSchema() {
     await ensureColumn('dish_ingredients', 'ingredient_category_id', 'INTEGER');
     await ensureColumn('dish_ingredients', 'is_mandatory', 'INTEGER NOT NULL DEFAULT 0');
     await ensureColumn('dish_ingredients', 'sort_order', 'INTEGER NOT NULL DEFAULT 0');
+    await ensureColumn('ingredients', 'is_allergen', 'INTEGER NOT NULL DEFAULT 0');
     await ensureColumn('categories', 'source', "TEXT NOT NULL DEFAULT 'operator'");
     await ensureColumn('categories', 'external_key', 'TEXT');
     await ensureColumn('dishes', 'source', "TEXT NOT NULL DEFAULT 'operator'");
@@ -273,11 +287,21 @@ export async function execSchema() {
     await ensureColumn('offers', 'external_key', 'TEXT');
     await ensureColumn('banner_images', 'source', "TEXT NOT NULL DEFAULT 'operator'");
     await ensureColumn('banner_images', 'external_key', 'TEXT');
+    await ensureColumn('orders', 'rider_latitude', 'REAL');
+    await ensureColumn('orders', 'rider_longitude', 'REAL');
+    await ensureColumn('orders', 'last_location_update', 'TEXT');
+    await ensureColumn('orders', 'updated_at', 'TEXT');
     await db.execAsync(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_categories_external_key ON categories(external_key);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_dishes_external_key ON dishes(external_key);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_offers_external_key ON offers(external_key);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_banner_images_external_key ON banner_images(external_key);
+      CREATE INDEX IF NOT EXISTS idx_cart_items_owner_key ON cart_items(owner_key);
+      CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+      CREATE INDEX IF NOT EXISTS idx_orders_rider_id ON orders(rider_id);
+      CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+      CREATE INDEX IF NOT EXISTS idx_reviews_dish_id ON reviews(dish_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
     `);
     await backfillLegacyIngredientCategories();
   } catch (error) {

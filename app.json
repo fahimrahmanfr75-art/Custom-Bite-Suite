@@ -48,9 +48,9 @@
       "eas": {
         "projectId": "YOUR_EAS_PROJECT_ID"
       },
-      "pushApiBaseUrl": "https://api.custombite.example",
+      "pushApiBaseUrl": "YOUR_PUSH_API_BASE_URL",
       "realtime": {
-        "webSocketUrl": "wss://api.custombite.example/orders/realtime"
+        "webSocketUrl": "YOUR_REALTIME_WEBSOCKET_URL"
       }
     }
   }

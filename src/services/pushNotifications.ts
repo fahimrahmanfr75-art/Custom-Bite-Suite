@@ -31,6 +31,13 @@ export function ensureNotificationHandlerConfigured() {
 export async function registerDeviceForPushNotificationsAsync(): Promise<PushRegistrationResult> {
   ensureNotificationHandlerConfigured();
 
+  if (!runtimeConfig.expoProjectId) {
+    return {
+      token: null,
+      error: null,
+    };
+  }
+
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('orders', {
       name: 'Order updates',
@@ -59,13 +66,6 @@ export async function registerDeviceForPushNotificationsAsync(): Promise<PushReg
     return {
       token: null,
       error: 'Push notification permission was not granted.',
-    };
-  }
-
-  if (!runtimeConfig.expoProjectId) {
-    return {
-      token: null,
-      error: 'Expo projectId is missing. Set expo.extra.eas.projectId in app.json.',
     };
   }
 

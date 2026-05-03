@@ -3,6 +3,7 @@ import { db } from './schema';
 const tableNames = [
   'users',
   'app_session',
+  'cart_items',
   'categories',
   'ingredient_categories',
   'dishes',

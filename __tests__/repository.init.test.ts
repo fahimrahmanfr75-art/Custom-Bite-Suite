@@ -78,6 +78,14 @@ describe('repository initialization and curated import', () => {
     const sql = getWriteSql();
 
     expect(sql).toContain('system_seed');
+    expect(sql).toContain('ALTER TABLE ingredients ADD COLUMN is_allergen INTEGER NOT NULL DEFAULT 0');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id)');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_orders_rider_id ON orders(rider_id)');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)');
+    expect(sql).toContain('CREATE INDEX IF NOT EXISTS idx_reviews_dish_id ON reviews(dish_id)');
+    expect(sql).toContain(
+      'CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)'
+    );
     expect(sql).not.toContain("INSERT INTO banner_images\n      (image_url, title, description, is_active, sort_order, created_at, source, external_key)\n     VALUES (?, ?, ?, ?, ?, ?, 'curated_import', ?)");
     expect(sql).not.toContain("INSERT INTO offers\n      (title, description, discount_percent, active_from, active_to, banner_color, source, external_key)\n     VALUES (?, ?, ?, ?, ?, ?, 'curated_import', ?)");
     expect(sql).not.toContain('DELETE FROM banner_images');
