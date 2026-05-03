@@ -1,8 +1,65 @@
 import { isSameDay, isSameMonth, isSameWeek, parseISO } from 'date-fns';
 
 import type { CartItem, DashboardMetrics, Order, OrderStatus } from '../types';
+import { calculateDistance, type LatLng } from './locationUtils';
 
-export const DELIVERY_FEE = 3.5;
+export const DELIVERY_FEE_CONFIG = {
+  minimumFee: 2,
+  includedDistanceKm: 1,
+  perKmRate: 0.5,
+  maximumFee: 8,
+  freeDeliveryThreshold: 50,
+  maxDemandMultiplier: 2,
+} as const;
+
+export const DEFAULT_RESTAURANT_LOCATION: LatLng = {
+  latitude: 23.7508,
+  longitude: 90.3906,
+};
+
+export type OrderPricingContext = {
+  restaurantLocation?: LatLng | null;
+  deliveryLocation?: LatLng | null;
+  demandMultiplier?: number;
+};
+
+function roundCurrency(value: number): number {
+  return Number(value.toFixed(2));
+}
+
+function clampDemandMultiplier(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.min(
+    Math.max(value ?? 1, 1),
+    DELIVERY_FEE_CONFIG.maxDemandMultiplier
+  );
+}
+
+export function calculateDeliveryFee(subtotal: number, context?: OrderPricingContext): number {
+  if (subtotal <= 0) {
+    return 0;
+  }
+
+  if (subtotal >= DELIVERY_FEE_CONFIG.freeDeliveryThreshold) {
+    return 0;
+  }
+
+  const deliveryLocation = context?.deliveryLocation;
+  if (!deliveryLocation) {
+    return DELIVERY_FEE_CONFIG.minimumFee;
+  }
+
+  const restaurantLocation = context?.restaurantLocation ?? DEFAULT_RESTAURANT_LOCATION;
+  const distanceKm = calculateDistance(restaurantLocation, deliveryLocation);
+  const billableDistanceKm = Math.max(0, distanceKm - DELIVERY_FEE_CONFIG.includedDistanceKm);
+  const distanceFee =
+    DELIVERY_FEE_CONFIG.minimumFee + billableDistanceKm * DELIVERY_FEE_CONFIG.perKmRate;
+  const adjustedFee = distanceFee * clampDemandMultiplier(context?.demandMultiplier);
+
+  return roundCurrency(Math.min(adjustedFee, DELIVERY_FEE_CONFIG.maximumFee));
+}
 
 export function calculateCartSubtotal(items: CartItem[]): number {
   return items.reduce((total, item) => {
@@ -14,14 +71,18 @@ export function calculateCartSubtotal(items: CartItem[]): number {
   }, 0);
 }
 
-export function calculateOrderTotals(items: CartItem[], discountPercent = 0) {
+export function calculateOrderTotals(
+  items: CartItem[],
+  discountPercent = 0,
+  pricingContext?: OrderPricingContext
+) {
   const subtotal = calculateCartSubtotal(items);
-  const discount = Number(((subtotal * discountPercent) / 100).toFixed(2));
-  const deliveryFee = items.length > 0 ? DELIVERY_FEE : 0;
-  const total = Number((subtotal - discount + deliveryFee).toFixed(2));
+  const discount = roundCurrency((subtotal * discountPercent) / 100);
+  const deliveryFee = items.length > 0 ? calculateDeliveryFee(subtotal, pricingContext) : 0;
+  const total = roundCurrency(subtotal - discount + deliveryFee);
 
   return {
-    subtotal: Number(subtotal.toFixed(2)),
+    subtotal: roundCurrency(subtotal),
     discount,
     deliveryFee,
     total,

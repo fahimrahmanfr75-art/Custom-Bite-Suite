@@ -8,6 +8,7 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
+generated/
 
 # Native
 .kotlin/
@@ -36,6 +37,23 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-# generated native folders
+# local tooling / IDE state
+.cursor/
+.gradle-local/
+.idea/
+.vscode/
+.zed/
+
+# native generated caches and outputs
+android/.gradle/
+android/.kotlin/
+android/app/.cxx/
+android/app/build/
+android/build/
+
+# native folders created by Expo prebuild when not intentionally versioned
 /ios
 /android
+
+# packaged outputs
+*.apk

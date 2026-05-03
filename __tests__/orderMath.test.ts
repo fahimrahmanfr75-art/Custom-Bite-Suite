@@ -1,4 +1,10 @@
-import { calculateOrderTotals, nextOrderStatus, buildManagerMetrics } from '../src/utils/orderMath';
+import {
+  DEFAULT_RESTAURANT_LOCATION,
+  calculateDeliveryFee,
+  calculateOrderTotals,
+  nextOrderStatus,
+  buildManagerMetrics,
+} from '../src/utils/orderMath';
 import { CartItem, Order } from '../src/types';
 
 const cart: CartItem[] = [
@@ -19,9 +25,12 @@ const orders: Order[] = [
     customerId: 1,
     customerName: 'Sara Ahmed',
     customerPhone: '01710000001',
+    customerEmail: 'sara@example.com',
     riderId: 3,
     riderName: 'Arif Hasan',
     riderPhone: '01710000003',
+    riderLatitude: 23.7,
+    riderLongitude: 90.3,
     addressLine: 'House 14',
     latitude: 23.7,
     longitude: 90.3,
@@ -39,6 +48,8 @@ const orders: Order[] = [
     readyAt: null,
     pickedUpAt: null,
     deliveredAt: null,
+    rejectedAt: null,
+    canceledAt: null,
     cashCollectedAt: null,
     items: [],
     refundRequest: null,
@@ -48,9 +59,12 @@ const orders: Order[] = [
     customerId: 1,
     customerName: 'Sara Ahmed',
     customerPhone: '01710000001',
+    customerEmail: 'sara@example.com',
     riderId: 3,
     riderName: 'Arif Hasan',
     riderPhone: '01710000003',
+    riderLatitude: 23.7,
+    riderLongitude: 90.3,
     addressLine: 'House 14',
     latitude: 23.7,
     longitude: 90.3,
@@ -68,6 +82,8 @@ const orders: Order[] = [
     readyAt: null,
     pickedUpAt: null,
     deliveredAt: null,
+    rejectedAt: null,
+    canceledAt: null,
     cashCollectedAt: null,
     items: [],
     refundRequest: null,
@@ -75,13 +91,45 @@ const orders: Order[] = [
 ];
 
 describe('order math', () => {
-  it('calculates totals including customization, discount, and delivery fee', () => {
-    expect(calculateOrderTotals(cart, 10)).toEqual({
+  it('calculates totals with a reduced fee for short-distance deliveries', () => {
+    expect(
+      calculateOrderTotals(cart, 10, {
+        restaurantLocation: DEFAULT_RESTAURANT_LOCATION,
+        deliveryLocation: {
+          latitude: 23.7512,
+          longitude: 90.391,
+        },
+      })
+    ).toEqual({
       subtotal: 23,
       discount: 2.3,
-      deliveryFee: 3.5,
-      total: 24.2,
+      deliveryFee: 2,
+      total: 22.7,
     });
+  });
+
+  it('raises the fee for longer-distance deliveries and honors the cap', () => {
+    expect(
+      calculateDeliveryFee(23, {
+        restaurantLocation: DEFAULT_RESTAURANT_LOCATION,
+        deliveryLocation: {
+          latitude: 23.9008,
+          longitude: 90.3906,
+        },
+      })
+    ).toBe(8);
+  });
+
+  it('waives the fee for large orders after the free-delivery threshold', () => {
+    expect(
+      calculateDeliveryFee(50, {
+        restaurantLocation: DEFAULT_RESTAURANT_LOCATION,
+        deliveryLocation: {
+          latitude: 23.79,
+          longitude: 90.41,
+        },
+      })
+    ).toBe(0);
   });
 
   it('advances order status in the expected flow', () => {

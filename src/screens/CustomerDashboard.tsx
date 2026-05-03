@@ -1,69 +1,114 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  KeyboardAvoidingView,
+  Image,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
-  StyleSheet,
   Switch,
+  StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AppButton, Field, Pill, ScreenCard, SectionTitle, commonStyles } from '../components/common';
-import { useApp } from '../context/AppContext';
-import { calculateCartSubtotal, calculateOrderTotals } from '../utils/orderMath';
-import type { Dish, Order, OrderItemCustomization } from '../types';
+import { AppButton, Card3D, Field, FloatingActionMenu, OrderStatusBadge, Pill, ScreenCard, SectionTitle, commonStyles } from '../components/common';
+import {
+  useAppActions,
+  useAppStatus,
+  useCatalogState,
+  useOrdersState,
+  useSessionState,
+} from '../context/AppContext';
+import {
+  DELIVERY_FEE_CONFIG,
+  calculateCartSubtotal,
+  calculateOrderTotals,
+} from '../utils/orderMath';
+import { calculateDishPrice } from '../utils/dishPricing';
+import { DishTab } from './DishTab';
+import { MapPickerScreen } from './MapPickerScreen';
+import { LiveTrackingScreen } from './LiveTrackingScreen';
+import type { Dish, Order } from '../types';
 
 type CustomerTab = 'explore' | 'cart' | 'orders' | 'account';
 
+function formatCustomerTabLabel(tab: CustomerTab) {
+  switch (tab) {
+    case 'explore':
+      return 'Explore';
+    case 'cart':
+      return 'Cart';
+    case 'orders':
+      return 'Orders';
+    case 'account':
+      return 'Account';
+    default:
+      return tab;
+  }
+}
+
 export function CustomerDashboard() {
+  const insets = useSafeAreaInsets();
+  const { currentUser, session } = useSessionState();
+  const { activeDiscountPercent, banners, categories, dishes, restaurantLocation } =
+    useCatalogState();
+  const orders = useOrdersState();
   const {
-    session,
-    users,
-    offers,
-    dishes,
-    categories,
-    orders,
-    cart,
-    activeDiscountPercent,
     addToCart,
-    updateCartQuantity,
-    removeFromCart,
+    cancelMyOrder,
+    cart,
     clearCart,
+    logout,
     placeOrder,
+    removeFromCart,
     submitRefund,
     submitReview,
-    logout,
-    isBusy,
-  } = useApp();
+    updateCartQuantity,
+  } = useAppActions();
+  const { isBusy } = useAppStatus();
 
   const [activeTab, setActiveTab] = useState<CustomerTab>('explore');
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<number | 'all'>('all');
   const [selectedDish, setSelectedDish] = useState<Dish | null>(null);
-  const [instructions, setInstructions] = useState('');
-  const [quantity, setQuantity] = useState(1);
-  const [selectedCustomizations, setSelectedCustomizations] = useState<OrderItemCustomization[]>([]);
   const [deliveryNotes, setDeliveryNotes] = useState('');
-  const [isCod, setCod] = useState(true);
+  const [deliveryLocation, setDeliveryLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [useManualAddress, setUseManualAddress] = useState(false);
+  const [areaName, setAreaName] = useState('');
+  const [roadNumber, setRoadNumber] = useState('');
+  const [houseNumber, setHouseNumber] = useState('');
   const [refundReason, setRefundReason] = useState('');
   const [refundDetails, setRefundDetails] = useState('');
   const [refundOrderId, setRefundOrderId] = useState<number | null>(null);
-  const [reviewOrderId, setReviewOrderId] = useState<number | null>(null);
-  const [reviewDishId, setReviewDishId] = useState<number | null>(null);
-  const [reviewRating, setReviewRating] = useState('5');
-  const [reviewComment, setReviewComment] = useState('');
+  const [activeBannerIndex, setActiveBannerIndex] = useState(0);
+  const [showMapPicker, setShowMapPicker] = useState(false);
+  const [trackingOrderId, setTrackingOrderId] = useState<number | null>(null);
+  const bannerScrollRef = useRef<ScrollView | null>(null);
+  const { width: windowWidth } = useWindowDimensions();
 
-  const currentUser = users.find((user) => user.id === session?.userId) ?? null;
   const customerOrders = orders.filter((order) => order.customerId === session?.userId);
-  const activeOrders = customerOrders.filter((order) => order.status !== 'delivered');
-  const historyOrders = customerOrders.filter((order) => order.status === 'delivered');
+  const activeOrders = customerOrders.filter((order) =>
+    ['pending', 'accepted', 'preparing', 'ready', 'on_the_way'].includes(order.status)
+  );
+  const historyOrders = customerOrders.filter((order) => ['delivered', 'rejected', 'canceled'].includes(order.status));
+
+  const effectiveLocation =
+    deliveryLocation ??
+    (currentUser ? { latitude: currentUser.latitude, longitude: currentUser.longitude } : null);
+  const manualAddressLine = `${areaName.trim()}_Road_${roadNumber.trim()}_House_${houseNumber.trim()}`;
+  const hasManualAddress =
+    areaName.trim().length > 0 && roadNumber.trim().length > 0 && houseNumber.trim().length > 0;
+  const canPlaceOrder = cart.length > 0 && isBusy === false && effectiveLocation !== null && (!useManualAddress || hasManualAddress);
 
   const filteredDishes = useMemo(() => {
     const lowered = search.trim().toLowerCase();
-    return dishes.filter((dish) => {
+    return (dishes || []).filter((dish) => {
+      if (!dish) return false;
       const matchesCategory = selectedCategory === 'all' || dish.categoryId === selectedCategory;
-      const ingredientText = dish.ingredients.map((item) => item.name.toLowerCase()).join(' ');
+      const ingredientText = (dish.ingredients || []).map((item) => item.name.toLowerCase()).join(' ');
       const matchesSearch =
         lowered.length === 0 ||
         dish.name.toLowerCase().includes(lowered) ||
@@ -71,85 +116,189 @@ export function CustomerDashboard() {
       return matchesCategory && matchesSearch;
     });
   }, [dishes, search, selectedCategory]);
+  const customerNavigationItems = useMemo(
+    () => [
+      { key: 'explore', label: 'Explore dishes', icon: 'compass-outline' as const, active: activeTab === 'explore', onPress: () => setActiveTab('explore') },
+      { key: 'cart', label: 'Cart', icon: 'bag-handle-outline' as const, active: activeTab === 'cart', onPress: () => setActiveTab('cart') },
+      { key: 'orders', label: 'Orders', icon: 'receipt-outline' as const, active: activeTab === 'orders', onPress: () => setActiveTab('orders') },
+      { key: 'account', label: 'Account', icon: 'person-circle-outline' as const, active: activeTab === 'account', onPress: () => setActiveTab('account') },
+    ],
+    [activeTab]
+  );
 
-  const totals = calculateOrderTotals(cart, activeDiscountPercent);
+  const totals = calculateOrderTotals(cart, activeDiscountPercent, {
+    restaurantLocation,
+    deliveryLocation: effectiveLocation,
+  });
+
+  function calculateDisplayedDishPrice(dish: Dish | null | undefined): number {
+    if (!dish) return 0;
+    return calculateDishPrice(dish);
+  }
+
+  // Render star rating
+  function renderStars(rating: number): string {
+    const filled = Math.round(rating);
+    const empty = 5 - filled;
+    return '★'.repeat(filled) + '☆'.repeat(empty);
+  }
 
   function openDish(dish: Dish) {
     setSelectedDish(dish);
-    setInstructions('');
-    setQuantity(1);
-    setSelectedCustomizations([]);
   }
 
-  function toggleCustomization(
-    ingredientId: number,
-    action: 'add' | 'remove',
-    name: string,
-    priceDelta: number
-  ) {
-    setSelectedCustomizations((current) => {
-      const exists = current.find(
-        (item) => item.ingredientId === ingredientId && item.action === action
-      );
-      if (exists) {
-        return current.filter(
-          (item) => !(item.ingredientId === ingredientId && item.action === action)
-        );
+  async function handleMapLocationSelected(location: { latitude: number; longitude: number }) {
+    setDeliveryLocation(location);
+    setShowMapPicker(false);
+  }
+
+  useEffect(() => {
+    banners.forEach((banner) => {
+      if (banner.imageUrl) {
+        void Image.prefetch(banner.imageUrl);
       }
-      return [...current, { ingredientId, action, name, priceDelta }];
     });
-  }
+  }, [banners]);
 
-  function commitDishSelection() {
-    if (!selectedDish) {
+  useEffect(() => {
+    if (banners.length <= 1) {
+      setActiveBannerIndex(0);
       return;
     }
-    addToCart({
-      id: `${selectedDish.id}-${Date.now()}`,
-      dishId: selectedDish.id,
-      dishName: selectedDish.name,
-      quantity,
-      basePrice: selectedDish.price,
-      instructions,
-      customizations: selectedCustomizations,
-    });
-    setSelectedDish(null);
+    const interval = setInterval(() => {
+      setActiveBannerIndex((current) => {
+        const next = (current + 1) % banners.length;
+        bannerScrollRef.current?.scrollTo({
+          x: next * Math.max(windowWidth - 32, 280),
+          y: 0,
+          animated: true,
+        });
+        return next;
+      });
+    }, 4500);
+
+    return () => clearInterval(interval);
+  }, [banners.length, windowWidth]);
+
+  if (showMapPicker) {
+    return (
+      <MapPickerScreen
+        onLocationSelected={handleMapLocationSelected}
+        initialLocation={deliveryLocation || undefined}
+      />
+    );
   }
 
-  const topOffer = offers[0];
+  if (trackingOrderId) {
+    return (
+      <LiveTrackingScreen
+        order={orders.find((o) => o.id === trackingOrderId) || ({} as Order)}
+        onBack={() => setTrackingOrderId(null)}
+      />
+    );
+  }
+
+  if (selectedDish) {
+    return (
+      <DishTab
+        dish={selectedDish}
+        onBack={() => setSelectedDish(null)}
+        onAddToCart={(customizations, quantity, instructionText) => {
+          addToCart({
+            id: `${selectedDish.id}-${Date.now()}`,
+            dishId: selectedDish.id,
+            dishName: selectedDish.name,
+            quantity,
+            basePrice: calculateDishPrice(selectedDish),
+            instructions: instructionText,
+            customizations,
+          });
+          setSelectedDish(null);
+        }}
+        onSubmitReview={(rating, comment) => {
+          void submitReview({
+            dishId: selectedDish.id,
+            rating,
+            comment,
+            orderId: 0,
+          });
+        }}
+        currentUser={currentUser}
+        isBusy={isBusy}
+      />
+    );
+  }
 
   return (
-    <View style={styles.page}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.page}
+    >
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <View>
             <Text style={styles.eyebrow}>Customer Console</Text>
-            <Text style={styles.title}>Order with full kitchen and rider visibility.</Text>
+            {/* <Text style={styles.title}>Order with full kitchen and rider visibility.</Text> */}
           </View>
-          <AppButton label="Logout" variant="ghost" onPress={() => void logout()} />
-        </View>
-
-        <View style={styles.tabRow}>
-          {(['explore', 'cart', 'orders', 'account'] as CustomerTab[]).map((tab) => (
-            <Pill key={tab} label={tab} active={tab === activeTab} onPress={() => setActiveTab(tab)} />
-          ))}
         </View>
 
         {activeTab === 'explore' ? (
           <>
-            {topOffer ? (
-              <ScreenCard style={[styles.heroCard, { backgroundColor: topOffer.bannerColor }]}>
-                <Text style={styles.offerKicker}>Current Offer</Text>
-                <Text style={styles.offerTitle}>{topOffer.title}</Text>
-                <Text style={styles.offerDescription}>{topOffer.description}</Text>
-                <Text style={styles.offerMeta}>{topOffer.discountPercent}% automatically applied</Text>
-              </ScreenCard>
-            ) : null}
+            {banners.length > 0 ? (
+              <View>
+                <ScrollView
+                  ref={(ref) => {
+                    bannerScrollRef.current = ref;
+                  }}
+                  horizontal
+                  pagingEnabled
+                  showsHorizontalScrollIndicator={false}
+                  style={styles.bannerScroll}
+                  onMomentumScrollEnd={(event) => {
+                    const bannerWidth = Math.max(windowWidth - 32, 280);
+                    const nextIndex = Math.round(event.nativeEvent.contentOffset.x / bannerWidth);
+                    setActiveBannerIndex(nextIndex);
+                  }}
+                >
+                  {banners.map((banner) => (
+                    <Card3D key={banner.id} style={[styles.bannerCard, { width: Math.max(windowWidth - 32, 280) }]}>
+                      <Image
+                        source={{ uri: banner.imageUrl }}
+                        style={styles.bannerImage}
+                        resizeMode="cover"
+                        accessibilityLabel={banner.title}
+                      />
+                      <View style={styles.bannerContent}>
+                        <Text style={styles.bannerTitle}>{banner.title}</Text>
+                        <Text style={styles.bannerDescription} numberOfLines={2}>{banner.description}</Text>
+                      </View>
+                    </Card3D>
+                  ))}
+                </ScrollView>
+                <View style={styles.bannerDots}>
+                  {banners.map((banner, index) => (
+                    <View
+                      key={banner.id}
+                      style={[styles.bannerDot, index === activeBannerIndex && styles.bannerDotActive]}
+                    />
+                  ))}
+                </View>
+              </View>
+            ) : (
+              <Card3D style={[styles.bannerCard, { width: Math.max(windowWidth - 32, 280) }]}>
+                <View style={[styles.bannerImage, styles.bannerFallback]}>
+                  <Text style={styles.bannerFallbackTitle}>No Active Banner</Text>
+                  <Text style={styles.bannerFallbackText}>Manager can add a banner from Menu - Banner System.</Text>
+                </View>
+              </Card3D>
+            )}
+
+
 
             <ScreenCard>
               <SectionTitle
                 title="Search and browse"
-                subtitle="Find dishes by name or by ingredient to match dietary needs."
+              // subtitle="Find dishes by name or by ingredient to match dietary needs."
               />
               <Field
                 label="Search dishes or ingredients"
@@ -176,25 +325,39 @@ export function CustomerDashboard() {
               </ScrollView>
 
               <View style={styles.stack}>
-                {filteredDishes.map((dish) => (
-                  <Pressable key={dish.id} onPress={() => openDish(dish)} style={styles.dishCard}>
-                    <View style={styles.dishHead}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.dishName}>{dish.name}</Text>
+                {filteredDishes.filter(d => d != null).map((dish) => (
+                  <Card3D key={dish.id} style={styles.dishCard}>
+                    <Pressable onPress={() => openDish(dish)}>
+                      {dish.imageUrl ? (
+                        <Image
+                          source={{ uri: dish.imageUrl }}
+                          style={styles.dishImage}
+                          accessibilityLabel={dish.name}
+                        />
+                      ) : (
+                        <View style={[styles.dishImage, styles.dishImagePlaceholder]} />
+                      )}
+                      <View style={styles.dishContent}>
+                        <View style={styles.dishHead}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.dishName}>{dish.name}</Text>
+                            {dish.averageRating > 0 ? (
+                              <Text style={styles.dishRating}>
+                                {renderStars(dish.averageRating)} {dish.averageRating.toFixed(1)} ({dish.reviewCount})
+                              </Text>
+                            ) : (
+                              <Text style={styles.dishRating}>No ratings yet</Text>
+                            )}
+                          </View>
+                          <Text style={styles.dishPrice}>${calculateDisplayedDishPrice(dish).toFixed(2)}</Text>
+                        </View>
+                        <Text style={styles.dishDescription}>{dish.description}</Text>
                         <Text style={styles.dishMeta}>
-                          {dish.categoryName} | {dish.prepTimeMinutes} min | {dish.calories} kcal
+                          {dish.categoryName} • {dish.prepTimeMinutes} min • {dish.calories} kcal
                         </Text>
                       </View>
-                      <Text style={styles.dishPrice}>${dish.price.toFixed(2)}</Text>
-                    </View>
-                    <Text style={styles.dishDescription}>{dish.description}</Text>
-                    <Text style={styles.dishMeta}>
-                      Ingredients: {dish.ingredients.map((item) => item.name).join(', ')}
-                    </Text>
-                    <Text style={styles.dishMeta}>
-                      Reviews: {dish.averageRating.toFixed(1)} / 5 from {dish.reviewCount} customers
-                    </Text>
-                  </Pressable>
+                    </Pressable>
+                  </Card3D>
                 ))}
               </View>
             </ScreenCard>
@@ -205,76 +368,176 @@ export function CustomerDashboard() {
           <ScreenCard>
             <SectionTitle
               title="Digital cart"
-              subtitle="Adjust quantities, choose COD, then send the order into the kitchen."
+            // subtitle="Customize items, set delivery location, then place your order."
             />
             <View style={styles.stack}>
               {cart.length === 0 ? (
                 <Text style={commonStyles.mutedText}>No items yet. Add a dish from Explore.</Text>
               ) : (
-                cart.map((item) => (
-                  <View key={item.id} style={styles.cartRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.dishName}>
-                        {item.dishName} x {item.quantity}
+                  cart.map((item) => (
+                    <View key={item.id} style={styles.cartItemCard}>
+                      <View style={styles.cartItemHeader}>
+                        <Text
+                          style={styles.cartItemName}
+                          numberOfLines={2}
+                          ellipsizeMode="tail"
+                        >
+                          {item.dishName}
+                        </Text>
+                        <AppButton
+                          icon="trash"
+                          variant="danger"
+                          onPress={() => removeFromCart(item.id)}
+                        />
+                      </View>
+                      {item.customizations.length > 0 && (
+                      <Text style={styles.cartItemMeta}>
+                        {item.customizations.map((c) => `${c.action} ${c.name}`).join(', ')}
                       </Text>
-                      <Text style={styles.dishMeta}>
-                        {item.customizations.map((customization) => `${customization.action} ${customization.name}`).join(', ') || 'No custom changes'}
+                    )}
+                    {item.instructions && (
+                      <Text style={styles.cartItemMeta}>📝 {item.instructions}</Text>
+                    )}
+                    <View style={styles.cartItemFooter}>
+                      <View style={styles.cartQuantity}>
+                        <AppButton
+                          icon="remove"
+                          variant="ghost"
+                          onPress={() => updateCartQuantity(item.id, item.quantity - 1)}
+                        />
+                        <Text style={styles.quantityText}>{item.quantity}</Text>
+                        <AppButton
+                          icon="add"
+                          variant="ghost"
+                          onPress={() => updateCartQuantity(item.id, item.quantity + 1)}
+                        />
+                      </View>
+                      <Text style={styles.itemPrice}>
+                        ${(
+                          (item.basePrice +
+                            item.customizations.reduce((sum, customization) => sum + customization.priceDelta, 0)) *
+                          item.quantity
+                        ).toFixed(2)}
                       </Text>
-                      {item.instructions ? (
-                        <Text style={styles.dishMeta}>Instruction: {item.instructions}</Text>
-                      ) : null}
-                    </View>
-                    <View style={styles.cartActions}>
-                      <AppButton
-                        label="-"
-                        variant="ghost"
-                        onPress={() => updateCartQuantity(item.id, item.quantity - 1)}
-                      />
-                      <AppButton
-                        label="+"
-                        variant="ghost"
-                        onPress={() => updateCartQuantity(item.id, item.quantity + 1)}
-                      />
-                      <AppButton
-                        label="Remove"
-                        variant="danger"
-                        onPress={() => removeFromCart(item.id)}
-                      />
                     </View>
                   </View>
                 ))
               )}
             </View>
 
-            <Field
-              label="Delivery notes"
-              value={deliveryNotes}
-              onChangeText={setDeliveryNotes}
-              placeholder="Gate code 1234, floor, landmark..."
-              multiline
-            />
-            <View style={styles.switchRow}>
-              <Text style={styles.dishName}>Cash on Delivery</Text>
-              <Switch value={isCod} onValueChange={setCod} />
-            </View>
-            <Text style={styles.dishMeta}>Subtotal: ${calculateCartSubtotal(cart).toFixed(2)}</Text>
-            <Text style={styles.dishMeta}>Discount: ${totals.discount.toFixed(2)}</Text>
-            <Text style={styles.dishMeta}>Delivery fee: ${totals.deliveryFee.toFixed(2)}</Text>
-            <Text style={styles.totalText}>Total: ${totals.total.toFixed(2)}</Text>
+            {cart.length > 0 && (
+              <>
+                <View style={styles.divider} />
 
-            <View style={styles.actionRow}>
-              <AppButton label="Clear cart" variant="ghost" onPress={clearCart} />
-              <AppButton
-                label={isBusy ? 'Placing...' : 'Place order'}
-                onPress={() =>
-                  void placeOrder({
-                    deliveryNotes,
-                    paymentMethod: isCod ? 'cod' : 'card',
-                  })
-                }
-                disabled={cart.length === 0 || isBusy}
-              />
-            </View>
+                <View style={styles.stack}>
+                  <View style={styles.deliveryHeaderRow}>
+                    <Text style={styles.sectionLabel}>Delivery Location</Text>
+                    <View style={styles.deliverySwitchGroup}>
+                      <Text style={styles.deliverySwitchLabel}>Manual</Text>
+                      <Switch
+                        value={useManualAddress}
+                        onValueChange={setUseManualAddress}
+                        trackColor={{ false: '#D6D3C9', true: '#D45D31' }}
+                        thumbColor="#FFFFFF"
+                      />
+                    </View>
+                  </View>
+                  {useManualAddress ? (
+                    <View style={styles.stack}>
+                      <Field label="Area name" value={areaName} onChangeText={setAreaName} />
+                      <Field label="Road no." value={roadNumber} onChangeText={setRoadNumber} />
+                      <Field label="House no." value={houseNumber} onChangeText={setHouseNumber} />
+                    </View>
+                  ) : (
+                    <>
+                      <Text style={styles.cartItemMeta}>
+                        {effectiveLocation
+                          ? `${effectiveLocation.latitude.toFixed(5)}, ${effectiveLocation.longitude.toFixed(5)}`
+                          : 'No location selected'}
+                      </Text>
+                      <AppButton
+                        label="Set Location"
+                        variant="secondary"
+                        onPress={() => {
+                          setShowMapPicker(true);
+                        }}
+                      />
+                    </>
+                  )}
+                </View>
+
+                <Field
+                  label="Delivery notes (optional)"
+                  value={deliveryNotes}
+                  onChangeText={setDeliveryNotes}
+                  placeholder="Direction, floor no., landmark..."
+                  multiline
+                />
+
+                <View style={styles.divider} />
+
+                <View style={styles.totalsCard}>
+                  <View style={styles.totalsRow}>
+                    <Text style={styles.totalsLabel}>Subtotal</Text>
+                    <Text style={styles.totalsValue}>${calculateCartSubtotal(cart).toFixed(2)}</Text>
+                  </View>
+                  {totals.discount > 0 && (
+                    <View style={styles.totalsRow}>
+                      <Text style={styles.totalsLabel}>Discount ({activeDiscountPercent}%)</Text>
+                      <Text style={styles.totalsValue}>−${totals.discount.toFixed(2)}</Text>
+                    </View>
+                  )}
+                  <View style={styles.totalsRow}>
+                    <Text style={styles.totalsLabel}>Delivery fee</Text>
+                    <Text style={styles.totalsValue}>${totals.deliveryFee.toFixed(2)}</Text>
+                  </View>
+                  <Text style={styles.cartItemMeta}>
+                    {totals.deliveryFee === 0
+                      ? `Free delivery unlocked on orders of $${DELIVERY_FEE_CONFIG.freeDeliveryThreshold.toFixed(2)} or more.`
+                      : `Distance-based pricing with a $${DELIVERY_FEE_CONFIG.minimumFee.toFixed(2)} floor and free delivery from $${DELIVERY_FEE_CONFIG.freeDeliveryThreshold.toFixed(2)}.`}
+                  </Text>
+                  <View style={styles.totalsRowFinal}>
+                    <Text style={styles.totalLabel}>Total</Text>
+                    <Text style={styles.totalValue}>${totals.total.toFixed(2)}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.stack}>
+                  <View style={styles.centeredButtonRow}>
+                    <AppButton label="Clear cart" variant="ghost" onPress={clearCart} />
+                  </View>
+                  <View style={styles.checkoutRow}>
+                    <AppButton
+                      label={isBusy ? 'Placing order...' : 'Pay online'}
+                      onPress={() =>
+                        void placeOrder({
+                          deliveryNotes,
+                          paymentMethod: 'card',
+                          latitude: effectiveLocation?.latitude ?? NaN,
+                          longitude: effectiveLocation?.longitude ?? NaN,
+                          deliveryAddressLine: useManualAddress ? manualAddressLine : undefined,
+                        })
+                      }
+                      disabled={!canPlaceOrder}
+                    />
+                    <AppButton
+                      label={isBusy ? 'Placing order...' : 'Cash on delivery'}
+                      variant="secondary"
+                      onPress={() =>
+                        void placeOrder({
+                          deliveryNotes,
+                          paymentMethod: 'cod',
+                          latitude: effectiveLocation?.latitude ?? NaN,
+                          longitude: effectiveLocation?.longitude ?? NaN,
+                          deliveryAddressLine: useManualAddress ? manualAddressLine : undefined,
+                        })
+                      }
+                      disabled={!canPlaceOrder}
+                    />
+                  </View>
+                </View>
+              </>
+            )}
           </ScreenCard>
         ) : null}
 
@@ -283,49 +546,99 @@ export function CustomerDashboard() {
             <ScreenCard>
               <SectionTitle
                 title="Live tracking"
-                subtitle="Accepted, preparing, ready, picked up, and rider contact are all visible."
+              // subtitle="Real-time updates on order status and rider location"
               />
               <View style={styles.stack}>
                 {activeOrders.length === 0 ? (
                   <Text style={commonStyles.mutedText}>No active orders right now.</Text>
                 ) : (
-                  activeOrders.map((order) => <OrderCard key={order.id} order={order} />)
+                  activeOrders.map((order) => (
+                    <OrderCard
+                      key={order.id}
+                      order={order}
+                      onCancel={() => void cancelMyOrder(order.id)}
+                      onTrackLive={() => setTrackingOrderId(order.id)}
+                    />
+                  ))
                 )}
               </View>
             </ScreenCard>
 
             <ScreenCard>
               <SectionTitle
-                title="History, refund, and review"
-                subtitle="Re-order favourites, file service complaints, or review dishes."
+                title="Order history"
+              // subtitle="Detailed view of past orders"
               />
               <View style={styles.stack}>
-                {historyOrders.map((order) => (
-                  <View key={order.id} style={styles.dishCard}>
-                    <Text style={styles.dishName}>Order #{order.id}</Text>
-                    <Text style={styles.dishMeta}>
-                      {order.items.map((item) => `${item.dishName} x ${item.quantity}`).join(', ')}
-                    </Text>
-                    <Text style={styles.dishMeta}>
-                      {order.paymentMethod.toUpperCase()} | ${order.total.toFixed(2)} | {order.status}
-                    </Text>
-                    <View style={styles.actionRow}>
-                      <AppButton
-                        label="Request refund"
-                        variant="ghost"
-                        onPress={() => setRefundOrderId(order.id)}
-                      />
-                      <AppButton
-                        label="Leave review"
-                        variant="secondary"
-                        onPress={() => {
-                          setReviewOrderId(order.id);
-                          setReviewDishId(order.items[0]?.dishId ?? null);
-                        }}
-                      />
-                    </View>
-                  </View>
-                ))}
+                {historyOrders.length === 0 ? (
+                  <Text style={commonStyles.mutedText}>No completed orders yet.</Text>
+                ) : (
+                  historyOrders.map((order) => (
+                    <Card3D key={order.id} style={styles.orderHistoryCard}>
+                      <View style={styles.orderHeader}>
+                        <View>
+                          <Text style={styles.dishName}>Order #{order.id}</Text>
+                          <Text style={styles.dishMeta}>
+                            {new Date(order.createdAt).toLocaleDateString()} at {new Date(order.createdAt).toLocaleTimeString()}
+                          </Text>
+                        </View>
+                        <View style={styles.orderStatus}>
+                          <OrderStatusBadge status={order.status} compact />
+                        </View>
+                      </View>
+
+                      <View style={styles.orderItemsSection}>
+                        <Text style={styles.sectionLabel}>Items</Text>
+                        {order.items.map((item, idx) => (
+                          <View key={idx} style={styles.orderItem}>
+                            <Text style={styles.dishName}>
+                              {item.dishName} × {item.quantity}
+                            </Text>
+                            {item.customizations?.length > 0 && (
+                              <Text style={styles.dishMeta}>
+                                {item.customizations.map((c) => `${c.action} ${c.name}`).join(', ')}
+                              </Text>
+                            )}
+                            <Text style={styles.itemPrice}>${item.unitPrice.toFixed(2)} each</Text>
+                          </View>
+                        ))}
+                      </View>
+
+                      <View style={styles.orderMetaSection}>
+                        <View style={styles.metaRow}>
+                          <Text style={styles.metaLabel}>Subtotal</Text>
+                          <Text style={styles.metaValue}>${order.subtotal.toFixed(2)}</Text>
+                        </View>
+                        <View style={styles.metaRow}>
+                          <Text style={styles.metaLabel}>Total</Text>
+                          <Text style={styles.metaValueBold}>${order.total.toFixed(2)}</Text>
+                        </View>
+                        <View style={styles.metaRow}>
+                          <Text style={styles.metaLabel}>Payment</Text>
+                          <Text style={styles.metaValue}>{order.paymentMethod.toUpperCase()}</Text>
+                        </View>
+                        {order.deliveryNotes && (
+                          <View style={styles.metaRow}>
+                            <Text style={styles.metaLabel}>Notes</Text>
+                            <Text style={styles.metaValue}>{order.deliveryNotes}</Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {order.status === 'delivered' && (
+                        <View style={styles.orderHistoryFooter}>
+                          <View style={styles.centeredButtonWrap}>
+                            <AppButton
+                              label="Request refund"
+                              variant="ghost"
+                              onPress={() => setRefundOrderId(order.id)}
+                            />
+                          </View>
+                        </View>
+                      )}
+                    </Card3D>
+                  ))
+                )}
               </View>
             </ScreenCard>
           </>
@@ -333,103 +646,66 @@ export function CustomerDashboard() {
 
         {activeTab === 'account' && currentUser ? (
           <ScreenCard>
-            <SectionTitle title="Account" subtitle="Profile and default delivery details." />
-            <Text style={styles.dishName}>
-              {currentUser.firstName} {currentUser.lastName}
-            </Text>
-            <Text style={styles.dishMeta}>@{currentUser.username}</Text>
-            <Text style={styles.dishMeta}>{currentUser.email}</Text>
-            <Text style={styles.dishMeta}>{currentUser.phone}</Text>
-            <Text style={styles.dishMeta}>{currentUser.addressLine}</Text>
-            <Text style={styles.dishMeta}>Notes: {currentUser.notes || 'None'}</Text>
+            <SectionTitle
+              title="Account"
+            // subtitle="Profile information"
+            />
+            <Card3D style={styles.accountCard}>
+              <View style={styles.accountField}>
+                <Text style={styles.accountLabel}>Name</Text>
+                <Text style={styles.accountValue}>
+                  {currentUser.firstName} {currentUser.lastName}
+                </Text>
+              </View>
+              <View style={styles.accountField}>
+                <Text style={styles.accountLabel}>Username</Text>
+                <Text style={styles.accountValue}>@{currentUser.username}</Text>
+              </View>
+              <View style={styles.accountField}>
+                <Text style={styles.accountLabel}>Email</Text>
+                <Text style={styles.accountValue}>{currentUser.email}</Text>
+              </View>
+              <View style={styles.accountField}>
+                <Text style={styles.accountLabel}>Phone</Text>
+                <Text style={styles.accountValue}>{currentUser.phone}</Text>
+              </View>
+              <View style={styles.accountField}>
+                <Text style={styles.accountLabel}>Date of Birth</Text>
+                <Text style={styles.accountValue}>{currentUser.dateOfBirth}</Text>
+              </View>
+            </Card3D>
+            <View style={styles.centeredButtonRow}>
+              <View style={styles.centeredButtonWrap}>
+                <AppButton
+                  label="Logout"
+                  variant="danger"
+                  onPress={() => void logout()}
+                />
+              </View>
+            </View>
           </ScreenCard>
         ) : null}
       </ScrollView>
 
-      <Modal visible={!!selectedDish} animationType="slide" transparent>
-        <View style={styles.modalBackdrop}>
-          <ScreenCard style={styles.modalCard}>
-            <SectionTitle
-              title={selectedDish?.name ?? ''}
-              subtitle={selectedDish?.description ?? ''}
-              action={<AppButton label="Close" variant="ghost" onPress={() => setSelectedDish(null)} />}
-            />
-            <Text style={styles.dishMeta}>
-              {selectedDish?.spiceLevel} spice | {selectedDish?.prepTimeMinutes} min
-            </Text>
-            <ScrollView style={{ maxHeight: 280 }}>
-              <View style={styles.stack}>
-                {selectedDish?.ingredients.map((ingredient) => (
-                  <View key={`${ingredient.ingredientId}-${ingredient.isDefault}`} style={styles.switchRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.dishName}>{ingredient.name}</Text>
-                      <Text style={styles.dishMeta}>
-                        {ingredient.isAllergen ? 'Allergen aware' : 'Standard'} | {ingredient.extraPrice > 0 ? `+$${ingredient.extraPrice.toFixed(2)}` : 'No extra cost'}
-                      </Text>
-                    </View>
-                    {ingredient.canRemove && ingredient.isDefault ? (
-                      <AppButton
-                        label={
-                          selectedCustomizations.some(
-                            (item) =>
-                              item.ingredientId === ingredient.ingredientId && item.action === 'remove'
-                          )
-                            ? 'Undo remove'
-                            : 'Remove'
-                        }
-                        variant="ghost"
-                        onPress={() =>
-                          toggleCustomization(
-                            ingredient.ingredientId,
-                            'remove',
-                            ingredient.name,
-                            0
-                          )
-                        }
-                      />
-                    ) : null}
-                    {ingredient.canAdd ? (
-                      <AppButton
-                        label={
-                          selectedCustomizations.some(
-                            (item) =>
-                              item.ingredientId === ingredient.ingredientId && item.action === 'add'
-                          )
-                            ? 'Undo add'
-                            : 'Add'
-                        }
-                        variant="secondary"
-                        onPress={() =>
-                          toggleCustomization(
-                            ingredient.ingredientId,
-                            'add',
-                            ingredient.name,
-                            ingredient.extraPrice
-                          )
-                        }
-                      />
-                    ) : null}
-                  </View>
-                ))}
-              </View>
-            </ScrollView>
-            <Field label="Kitchen instruction" value={instructions} onChangeText={setInstructions} />
-            <Field label="Quantity" value={String(quantity)} onChangeText={(value) => setQuantity(Math.max(1, Number(value) || 1))} keyboardType="number-pad" />
-            <AppButton label="Add to cart" onPress={commitDishSelection} />
-          </ScreenCard>
-        </View>
-      </Modal>
-
       <Modal visible={refundOrderId !== null} animationType="fade" transparent>
-        <View style={styles.modalBackdrop}>
+        <View
+          style={[
+            styles.modalBackdrop,
+            {
+              paddingTop: Math.max(insets.top, 16),
+              paddingBottom: Math.max(insets.bottom, 16),
+            },
+          ]}
+        >
           <ScreenCard style={styles.modalCard}>
             <SectionTitle title="Refund request" subtitle={`Order #${refundOrderId ?? ''}`} />
             <Field label="Reason" value={refundReason} onChangeText={setRefundReason} />
             <Field label="Details" value={refundDetails} onChangeText={setRefundDetails} multiline />
             <View style={styles.actionRow}>
-              <AppButton label="Cancel" variant="ghost" onPress={() => setRefundOrderId(null)} />
+              <AppButton icon='close' label="Cancel" variant="ghost" onPress={() => setRefundOrderId(null)} />
               <AppButton
                 label="Submit"
+                icon='paper-plane'
                 onPress={() => {
                   if (!refundOrderId) {
                     return;
@@ -450,71 +726,140 @@ export function CustomerDashboard() {
         </View>
       </Modal>
 
-      <Modal visible={reviewOrderId !== null} animationType="fade" transparent>
-        <View style={styles.modalBackdrop}>
-          <ScreenCard style={styles.modalCard}>
-            <SectionTitle title="Dish review" subtitle={`Order #${reviewOrderId ?? ''}`} />
-            <Field label="Dish ID" value={String(reviewDishId ?? '')} onChangeText={(value) => setReviewDishId(Number(value) || null)} keyboardType="number-pad" />
-            <Field label="Rating 1-5" value={reviewRating} onChangeText={setReviewRating} keyboardType="number-pad" />
-            <Field label="Comment" value={reviewComment} onChangeText={setReviewComment} multiline />
-            <View style={styles.actionRow}>
-              <AppButton label="Cancel" variant="ghost" onPress={() => setReviewOrderId(null)} />
-              <AppButton
-                label="Save"
-                onPress={() => {
-                  if (!reviewDishId || !reviewOrderId) {
-                    return;
-                  }
-                  void submitReview({
-                    orderId: reviewOrderId,
-                    dishId: reviewDishId,
-                    rating: Math.min(5, Math.max(1, Number(reviewRating) || 5)),
-                    comment: reviewComment,
-                  }).then(() => {
-                    setReviewOrderId(null);
-                    setReviewComment('');
-                    setReviewRating('5');
-                  });
-                }}
-              />
-            </View>
-          </ScreenCard>
-        </View>
-      </Modal>
-    </View>
+      <FloatingActionMenu
+        items={customerNavigationItems}
+        activeLabel={formatCustomerTabLabel(activeTab)}
+        accentColor="#D45D31"
+        containerStyle={{ bottom: Math.max(insets.bottom, 16) + 12 }}
+      />
+    </KeyboardAvoidingView>
   );
 }
 
-function OrderCard({ order }: { order: Order }) {
+function OrderCard({ order, onCancel, onTrackLive }: { order: Order; onCancel: () => void; onTrackLive?: () => void }) {
   const steps = [
-    ['accepted', order.acceptedAt],
-    ['preparing', order.preparingAt],
-    ['ready', order.readyAt],
-    ['on the way', order.pickedUpAt],
-    ['delivered', order.deliveredAt],
+    ['Pending', order.createdAt],
+    ['Accepted', order.acceptedAt],
+    ['Preparing', order.preparingAt],
+    ['Ready', order.readyAt],
+    ['On the way', order.pickedUpAt],
   ];
 
+  const currentStatus = order.status;
+  const canCancel = currentStatus !== 'ready' && currentStatus !== 'on_the_way' && currentStatus !== 'delivered';
+
   return (
-    <View style={styles.dishCard}>
-      <Text style={styles.dishName}>Order #{order.id}</Text>
-      <Text style={styles.dishMeta}>
-        {order.items.map((item) => `${item.dishName} x ${item.quantity}`).join(', ')}
-      </Text>
-      <Text style={styles.dishMeta}>
-        Rider: {order.riderName ?? 'Pending'} {order.riderPhone ? `| ${order.riderPhone}` : ''}
-      </Text>
-      <Text style={styles.dishMeta}>Notes: {order.deliveryNotes || 'No notes'}</Text>
-      <View style={styles.timeline}>
-        {steps.map(([label, date]) => (
-          <View key={label} style={styles.timelineRow}>
-            <View style={[styles.timelineDot, date ? styles.timelineDotActive : undefined]} />
-            <Text style={styles.dishMeta}>
-              {label}: {date ? new Date(date).toLocaleTimeString() : 'waiting'}
+    <Card3D style={styles.orderCard}>
+      <View style={styles.orderHeader}>
+        <View>
+          <Text style={styles.dishName}>Order #{order.id}</Text>
+          <Text style={styles.dishMeta}>
+            {new Date(order.createdAt).toLocaleDateString()} at {new Date(order.createdAt).toLocaleTimeString()}
+          </Text>
+        </View>
+        <View style={styles.orderStatus}>
+          <Text style={[styles.statusBadge, styles.statusActive]}>
+            {currentStatus === 'accepted' && ' Accepted'}
+            {currentStatus === 'preparing' && ' Preparing'}
+            {currentStatus === 'ready' && '✓ Ready'}
+            {currentStatus === 'on_the_way' && ' On the way'}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.orderItemsSection}>
+        <Text style={styles.sectionLabel}>Items ({order.items.length})</Text>
+        {order.items.map((item, idx) => (
+          <View key={idx} style={styles.orderItem}>
+            <Text style={styles.dishName}>
+              {item.dishName} × {item.quantity}
             </Text>
+            {item.customizations?.length > 0 && (
+              <Text style={styles.dishMeta}>
+                {item.customizations.map((c) => `${c.action} ${c.name}`).join(', ')}
+              </Text>
+            )}
+            <Text style={styles.itemPrice}>${(item.unitPrice * item.quantity).toFixed(2)}</Text>
           </View>
         ))}
       </View>
-    </View>
+
+      {order.riderName && (
+        <View style={styles.riderSection}>
+          <Text style={styles.sectionLabel}>Rider Information</Text>
+          <View style={styles.riderInfo}>
+            <Text style={styles.dishMeta}>Name: {order.riderName}</Text>
+            {order.riderPhone && <Text style={styles.dishMeta}>Phone: {order.riderPhone}</Text>}
+            {order.riderLatitude && order.riderLongitude && (
+              <Text style={styles.dishMeta}>
+                Location: ({order.riderLatitude.toFixed(4)}, {order.riderLongitude.toFixed(4)})
+              </Text>
+            )}
+          </View>
+        </View>
+      )}
+
+      <View style={styles.timelineContainer}>
+        <Text style={styles.sectionLabel}>Order Timeline</Text>
+        <View style={styles.timeline}>
+          {steps.map(([label, timestamp]) => {
+            const isCompleted = !!timestamp;
+            return (
+              <View key={label} style={styles.timelineRow}>
+                <View style={[styles.timelineDot, isCompleted && styles.timelineDotActive]} />
+                <View style={{ flex: 1, flexDirection: 'row'}}>
+                  <Text style={styles.timelineLabel}>{label}</Text>
+                  {timestamp && (
+                    <Text style={styles.timelineTime}>{new Date(timestamp).toLocaleTimeString()}</Text>
+                  )}
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+
+      {order.deliveryNotes && (
+        <View style={styles.notesSection}>
+          <Text style={styles.sectionLabel}>Delivery Notes</Text>
+          <Text style={styles.dishMeta}>{order.deliveryNotes}</Text>
+        </View>
+      )}
+
+      <View style={styles.orderMetaSection}>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Total</Text>
+          <Text style={styles.metaValueBold}>${order.total.toFixed(2)}</Text>
+        </View>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaLabel}>Payment</Text>
+          <Text style={styles.metaValue}>{order.paymentMethod.toUpperCase()}</Text>
+        </View>
+      </View>
+
+      <View style={styles.centeredAction}>
+        {order.status === 'on_the_way' && onTrackLive && (
+            <View style={styles.centeredButtonWrap}>
+              <AppButton
+                label="Live Tracking"
+                icon='locate'
+                variant="secondary"
+                onPress={onTrackLive}
+            />
+            </View>
+        )}
+        {canCancel && (
+          <View style={styles.centeredButtonWrap}>
+          <AppButton
+            label="Cancel order"
+            icon='trash'
+            variant="danger"
+            onPress={onCancel}
+          />
+          </View>
+        )}
+      </View>
+    </Card3D>
   );
 }
 
@@ -526,7 +871,7 @@ const styles = StyleSheet.create({
   content: {
     gap: 16,
     padding: 16,
-    paddingTop: 56,
+    paddingTop: 16,
     paddingBottom: 120,
   },
   header: {
@@ -553,9 +898,70 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+    padding: 8,
   },
-  heroCard: {
-    borderColor: 'transparent',
+  bannerScroll: {
+    marginHorizontal: -8,
+    paddingHorizontal: 8,
+    padding: 10,
+  },
+  bannerCard: {
+    borderRadius: 12,
+    marginHorizontal: 6,
+    overflow: 'hidden',
+  },
+  bannerImage: {
+    aspectRatio: 16 / 9,
+    backgroundColor: '#E3DACA',
+    borderRadius: 12,
+  },
+  bannerFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 18,
+  },
+  bannerFallbackTitle: {
+    color: '#0F2529',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  bannerFallbackText: {
+    color: '#56707B',
+    fontSize: 13,
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  bannerContent: {
+    backgroundColor: '#FFFBF2',
+    gap: 4,
+    padding: 10,
+  },
+  bannerTitle: {
+    color: '#0F2529',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  bannerDescription: {
+    color: '#56707B',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  bannerDots: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  bannerDot: {
+    backgroundColor: '#D1C8B8',
+    borderRadius: 999,
+    height: 8,
+    width: 8,
+  },
+  bannerDotActive: {
+    backgroundColor: '#D45D31',
+    width: 18,
   },
   offerKicker: {
     color: '#FCE8D5',
@@ -580,15 +986,30 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   stack: {
-    gap: 12,
+    gap: 16,
   },
   dishCard: {
     backgroundColor: '#FFFBF2',
-    borderColor: '#E3DACA',
+    borderColor: '#000000',
     borderRadius: 18,
     borderWidth: 1,
+    gap: 10,
+    overflow: 'hidden',
+    padding: 12,
+  },
+  dishImage: {
+    aspectRatio: 16 / 9,
+    backgroundColor: '#E3DACA',
+    borderRadius: 12,
+  },
+  dishImagePlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dishContent: {
     gap: 8,
-    padding: 14,
+    padding: 12,
+    paddingTop: 8,
   },
   dishHead: {
     flexDirection: 'row',
@@ -600,20 +1021,26 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  dishRating: {
+    color: '#D45D31',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
   dishPrice: {
     color: '#D45D31',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '800',
   },
   dishDescription: {
     color: '#335057',
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 13,
+    lineHeight: 18,
   },
   dishMeta: {
     color: '#56707B',
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
   },
   cartRow: {
     alignItems: 'center',
@@ -623,6 +1050,162 @@ const styles = StyleSheet.create({
   cartActions: {
     gap: 6,
     minWidth: 92,
+  },
+  cartItemCard: {
+    backgroundColor: '#F2EDE2',
+    borderColor: '#000000',
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
+    padding: 12,
+  },
+  cartItemHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between',
+  },
+  cartItemName: {
+    color: '#0F2529',
+    flex: 1,
+    flexShrink: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    minWidth: 0,
+  },
+  cartItemMeta: {
+    color: '#56707B',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  cartItemFooter: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
+  cartQuantity: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  checkoutRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  centeredButtonRow: {
+    alignItems: 'center',
+  },
+  centeredButtonWrap: {
+    alignSelf: 'center',
+  },
+  quantityText: {
+    color: '#0F2529',
+    fontSize: 14,
+    fontWeight: '600',
+    minWidth: 24,
+    textAlign: 'center',
+  },
+  itemPrice: {
+    color: '#D45D31',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  divider: {
+    borderBottomColor: '#000000',
+    borderBottomWidth: 1,
+    marginVertical: 12,
+  },
+  sectionLabel: {
+    color: '#0F2529',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  deliveryHeaderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  deliverySwitchGroup: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  deliverySwitchLabel: {
+    color: '#56707B',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  totalsCard: {
+    backgroundColor: '#F2EDE2',
+    borderColor: '#000000',
+    borderWidth: 1,
+    borderRadius: 12,
+    gap: 8,
+    padding: 12,
+  },
+  totalsRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  totalsRowFinal: {
+    alignItems: 'center',
+    borderTopColor: '#000000',
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+  },
+  totalsLabel: {
+    color: '#56707B',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  totalsValue: {
+    color: '#335057',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  totalLabel: {
+    color: '#0F2529',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  totalValue: {
+    color: '#D45D31',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  accountCard: {
+    backgroundColor: '#F9F6F0',
+    borderColor: '#000000',
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 0,
+    paddingVertical: 0,
+  },
+  accountField: {
+    alignItems: 'flex-start',
+    flexDirection: 'column',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomColor: '#E3DACA',
+    borderBottomWidth: 1,
+  },
+  accountLabel: {
+    color: '#000000',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+  },
+  accountValue: {
+    color: '#0F2529',
+    fontSize: 15,
+    fontWeight: '500',
   },
   switchRow: {
     alignItems: 'center',
@@ -640,6 +1223,13 @@ const styles = StyleSheet.create({
     gap: 10,
     justifyContent: 'space-between',
   },
+  orderHistoryFooter: {
+    alignItems: 'flex-start',
+    borderTopColor: '#000000',
+    borderTopWidth: 1,
+    marginTop: 4,
+    paddingTop: 12,
+  },
   modalBackdrop: {
     alignItems: 'center',
     backgroundColor: 'rgba(11, 30, 33, 0.48)',
@@ -648,8 +1238,56 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   modalCard: {
-    maxHeight: '88%',
-    width: '100%',
+    maxHeight: '100%',
+    maxWidth: '100%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  modalImage: {
+    aspectRatio: 16 / 9,
+    backgroundColor: '#E3DACA',
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  ingredientSectionTitle: {
+    color: '#0F2529',
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 12,
+    marginBottom: 8,
+    paddingBottom: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E3DACA',
+  },
+  ingredientRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2EDE2',
+  },
+  ingredientBadge: {
+    backgroundColor: '#FCE8D5',
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  ingredientBadgeText: {
+    color: '#D45D31',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  priceInfo: {
+    backgroundColor: '#F2EDE2',
+    borderRadius: 8,
+    gap: 4,
+    padding: 12,
   },
   timeline: {
     gap: 6,
@@ -658,6 +1296,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 10,
+    justifyContent: 'space-between',
   },
   timelineDot: {
     backgroundColor: '#D6D1C4',
@@ -667,5 +1306,123 @@ const styles = StyleSheet.create({
   },
   timelineDotActive: {
     backgroundColor: '#D45D31',
+  },
+  orderCard: {
+    backgroundColor: '#FFFBF2',
+    borderColor: '#000000',
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 12,
+    padding: 12,
+  },
+  orderHistoryCard: {
+    backgroundColor: '#F9F6F0',
+    borderColor: '#000000',
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 12,
+    padding: 12,
+  },
+  orderHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  orderStatus: {
+    alignItems: 'flex-end',
+  },
+  statusBadge: {
+    borderRadius: 6,
+    fontWeight: '600',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    fontSize: 12,
+  },
+  statusActive: {
+    backgroundColor: '#FCE8D5',
+    color: '#D45D31',
+  },
+  statusDelivered: {
+    backgroundColor: '#D1E9D5',
+    color: '#2D6D3E',
+  },
+  statusCancelled: {
+    backgroundColor: '#FCCCC3',
+    color: '#C1483D',
+  },
+  orderItemsSection: {
+    borderColor: '#000000',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    gap: 8,
+  },
+  orderItem: {
+    backgroundColor: '#F2EDE2',
+    borderColor: '#000000',
+    borderWidth: 1,
+    borderRadius: 8,
+    gap: 4,
+    padding: 8,
+  },
+  riderSection: {
+    gap: 6,
+  },
+  riderInfo: {
+    backgroundColor: '#F2EDE2',
+    borderColor: '#000000',
+    borderWidth: 1,
+    borderRadius: 8,
+    gap: 4,
+    padding: 8,
+  },
+  timelineContainer: {
+    gap: 8,
+  },
+  notesSection: {
+    gap: 6,
+  },
+  orderMetaSection: {
+    backgroundColor: '#F2EDE2',
+    borderColor: '#000000',
+    borderWidth: 1,
+    borderRadius: 8,
+    gap: 8,
+    padding: 10,
+  },
+  metaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  metaLabel: {
+    color: '#56707B',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  metaValue: {
+    color: '#335057',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  metaValueBold: {
+    color: '#0F2529',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  timelineLabel: {
+    color: '#0F2529',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  timelineTime: {
+    color: '#000000',
+    fontSize: 11,
+    textAlign: 'right',
+  },
+  centeredAction: {
+    alignItems: 'center',
   },
 });

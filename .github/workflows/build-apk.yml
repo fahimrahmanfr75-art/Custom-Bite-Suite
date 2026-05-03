@@ -37,6 +37,9 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      - name: Validate transport security policy
+        run: npm run check:transport-security
+
       - name: Build debug APK
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon

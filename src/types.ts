@@ -7,12 +7,15 @@ export type OrderStatus =
   | 'ready'
   | 'on_the_way'
   | 'delivered'
-  | 'cancelled';
+  | 'rejected'
+  | 'canceled';
 
 export type PaymentMethod = 'card' | 'cod';
 export type PaymentStatus = 'paid' | 'cod_pending' | 'cod_collected';
 export type RefundStatus = 'requested' | 'approved' | 'denied';
 export type IngredientAction = 'add' | 'remove';
+export type NotificationAudience = 'user' | 'role';
+export type NotificationKind = 'new_order' | 'order_status_changed';
 
 export type User = {
   id: number;
@@ -23,12 +26,32 @@ export type User = {
   email: string;
   phone: string;
   dateOfBirth: string;
-  passwordHash: string;
   addressLine: string;
   latitude: number;
   longitude: number;
   notes: string;
   createdAt: string;
+};
+
+export type CurrentUserProfile = {
+  id: number;
+  role: Role;
+  firstName: string;
+  lastName: string;
+  username: string;
+  email: string;
+  phone: string;
+  dateOfBirth: string;
+  addressLine: string;
+  latitude: number;
+  longitude: number;
+  notes: string;
+  createdAt: string;
+};
+
+export type RestaurantLocation = {
+  latitude: number;
+  longitude: number;
 };
 
 export type Offer = {
@@ -48,11 +71,26 @@ export type Category = {
   sortOrder: number;
 };
 
+export type IngredientCategory = {
+  id: number;
+  dishId: number;
+  name: string;
+  description: string;
+  sortOrder: number;
+};
+
+export type Ingredient = {
+  id: number;
+  name: string;
+};
+
 export type DishIngredient = {
   ingredientId: number;
+  ingredientCategoryId: number;
+  ingredientCategoryName: string;
   name: string;
-  isAllergen: boolean;
   isDefault: boolean;
+  isMandatory: boolean;
   extraPrice: number;
   canAdd: boolean;
   canRemove: boolean;
@@ -86,11 +124,37 @@ export type Dish = {
   reviewCount: number;
 };
 
+export type BannerImage = {
+  id: number;
+  imageUrl: string;
+  title: string;
+  description: string;
+  isActive: boolean;
+  sortOrder: number;
+  createdAt: string;
+};
+
+export type BannerPayload = {
+  id?: number;
+  imageUrl: string;
+  title: string;
+  description: string;
+  isActive: boolean;
+  sortOrder: number;
+};
+
 export type OrderItemCustomization = {
   ingredientId: number;
   name: string;
   action: IngredientAction;
   priceDelta: number;
+};
+
+export type OrderItemIngredientSnapshot = {
+  ingredientId: number;
+  ingredientName: string;
+  ingredientCategoryName: string;
+  price: number;
 };
 
 export type OrderItem = {
@@ -102,6 +166,7 @@ export type OrderItem = {
   unitPrice: number;
   instructions: string;
   customizations: OrderItemCustomization[];
+  ingredientSnapshots: OrderItemIngredientSnapshot[];
 };
 
 export type RefundRequest = {
@@ -122,9 +187,12 @@ export type Order = {
   customerId: number;
   customerName: string;
   customerPhone: string;
+  customerEmail: string;
   riderId: number | null;
   riderName: string | null;
   riderPhone: string | null;
+  riderLatitude: number | null;
+  riderLongitude: number | null;
   addressLine: string;
   latitude: number;
   longitude: number;
@@ -142,6 +210,8 @@ export type Order = {
   readyAt: string | null;
   pickedUpAt: string | null;
   deliveredAt: string | null;
+  rejectedAt: string | null;
+  canceledAt: string | null;
   cashCollectedAt: string | null;
   items: OrderItem[];
   refundRequest: RefundRequest | null;
@@ -156,6 +226,19 @@ export type AuditLog = {
   entityId: number;
   action: string;
   details: string;
+  createdAt: string;
+};
+
+export type AppNotification = {
+  id: number;
+  audience: NotificationAudience;
+  recipientUserId: number | null;
+  recipientRole: Role | null;
+  orderId: number | null;
+  kind: NotificationKind;
+  title: string;
+  message: string;
+  isRead: boolean;
   createdAt: string;
 };
 
@@ -210,6 +293,9 @@ export type SubmitRefundPayload = {
 export type PlaceOrderPayload = {
   deliveryNotes: string;
   paymentMethod: PaymentMethod;
+  latitude: number;
+  longitude: number;
+  deliveryAddressLine?: string;
 };
 
 export type ManagerDishPayload = {
@@ -222,6 +308,23 @@ export type ManagerDishPayload = {
   calories: number;
   spiceLevel: string;
   isAvailable: boolean;
+  imageUrl: string;
+  ingredientCategories: Array<{
+    id?: number;
+    name: string;
+    description: string;
+    sortOrder: number;
+    ingredients: Array<{
+      ingredientId?: number;
+      name: string;
+      isMandatory: boolean;
+      isDefault: boolean;
+      extraPrice: number;
+      canAdd: boolean;
+      canRemove: boolean;
+      sortOrder: number;
+    }>;
+  }>;
 };
 
 export type DashboardMetrics = {
@@ -235,11 +338,17 @@ export type DashboardMetrics = {
 };
 
 export type AppSnapshot = {
+  currentUser: CurrentUserProfile | null;
+  restaurantLocation: RestaurantLocation | null;
   users: User[];
   offers: Offer[];
+  banners: BannerImage[];
   categories: Category[];
+  ingredientCategories: IngredientCategory[];
+  ingredients: Ingredient[];
   dishes: Dish[];
   orders: Order[];
+  notifications: AppNotification[];
   auditLogs: AuditLog[];
   metrics: DashboardMetrics;
   session: Session | null;

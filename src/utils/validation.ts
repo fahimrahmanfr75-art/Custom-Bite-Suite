@@ -25,8 +25,8 @@ export const registerSchema = z
     dateOfBirth: z.string().min(4, 'Date of birth is required'),
     password: passwordRule,
     confirmPassword: z.string(),
-    addressLine: z.string().min(8, 'Address is required'),
-    notes: z.string().optional(),
+    addressLine: z.string().optional().default(''),
+    notes: z.string().optional().default(''),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Passwords do not match',
