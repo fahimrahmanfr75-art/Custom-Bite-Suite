@@ -8,7 +8,7 @@ REM ============================================================
 echo Setting up environment...
 set "JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
 set "PATH=%JAVA_HOME%\bin;%PATH%"
-set "ANDROID_SDK_ROOT=C:\Users\User\AppData\Local\Android\Sdk"
+set "ANDROID_SDK_ROOT=%LOCALAPPDATA%\Android\Sdk"
 set "ANDROID_HOME=%ANDROID_SDK_ROOT%"
 set "PATH=%ANDROID_SDK_ROOT%\platform-tools;%ANDROID_SDK_ROOT%\emulator;%PATH%"
 if not defined GRADLE_USER_HOME set "GRADLE_USER_HOME=%USERPROFILE%\.gradle"
@@ -17,7 +17,7 @@ echo.
 echo ============================================================
 echo  Building RELEASE APK  (this takes a few minutes)...
 echo ============================================================
-cd /d C:\Users\User\Desktop\FOA\custom-bite-suite\android
+cd /d "%~dp0android"
 call gradlew.bat assembleRelease
 
 if %ERRORLEVEL% neq 0 (
@@ -33,8 +33,8 @@ echo  Build SUCCESSFUL!
 echo ============================================================
 
 REM Copy the APK to the project root for easy access
-set "APK_SRC=C:\Users\User\Desktop\FOA\custom-bite-suite\android\app\build\outputs\apk\release\app-release.apk"
-set "APK_DST=C:\Users\User\Desktop\FOA\custom-bite-suite\CustomBiteSuite-release.apk"
+set "APK_SRC=%~dp0android\app\build\outputs\apk\release\app-release.apk"
+set "APK_DST=%~dp0CustomBiteSuite-release.apk"
 
 if exist "%APK_SRC%" (
     copy /Y "%APK_SRC%" "%APK_DST%"
